@@ -21,7 +21,7 @@ from telegram.ext import (
 # ================= CONFIG =================
 
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 123456789  # GANTI DENGAN ID TELEGRAM KAMU
+ADMIN_ID = 7777471529  # GANTI DENGAN ID TELEGRAM KAMU
 QRIS_IMAGE_PATH = "qris.png"
 
 logging.basicConfig(level=logging.INFO)
