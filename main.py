@@ -18,16 +18,17 @@ from telegram.ext import (
 )
 
 # ================= CONFIG =================
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
+TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 123456789  # GANTI DENGAN ID TELEGRAM KAMU
 QRIS_IMAGE_PATH = "qris.png"
 
 logging.basicConfig(level=logging.INFO)
+
 app = Flask(__name__)
 
 # ================= DATABASE =================
+
 conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -173,15 +174,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         trx_id = cursor.lastrowid
 
-        await update.message.reply_photo(
-            photo=open(QRIS_IMAGE_PATH, "rb"),
-            caption=(
-                f"🆔 ID: RBX-{trx_id}\n"
-                f"💰 Total Bayar: Rp{amount+fee}\n\n"
-                "Silakan scan QRIS di atas.\n"
-                "Setelah bayar, kirim foto bukti transfer."
+        with open(QRIS_IMAGE_PATH, "rb") as qris_file:
+            await update.message.reply_photo(
+                photo=qris_file,
+                caption=(
+                    f"🆔 ID: RBX-{trx_id}\n"
+                    f"💰 Total Bayar: Rp{amount+fee}\n\n"
+                    "Silakan scan QRIS di atas.\n"
+                    "Setelah bayar, kirim foto bukti transfer."
+                )
             )
-        )
 
         context.user_data["trx_id"] = trx_id
         context.user_data["step"] = "upload_proof"
@@ -213,7 +215,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await update.message.reply_text("⏳ Bukti dikirim ke admin. Menunggu verifikasi.")
-
         context.user_data.clear()
 
 # ================= SELESAI =================
@@ -250,11 +251,10 @@ async def selesai(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         ADMIN_ID,
-        f"💸 Transfer manual ke seller ID {seller_id}\n"
-        f"Nominal: Rp{amount}"
+        f"💸 Transfer manual ke seller ID {seller_id}\nNominal: Rp{amount}"
     )
 
-# ================= WEBHOOK =================
+# ================= TELEGRAM APP INIT =================
 
 telegram_app = Application.builder().token(TOKEN).build()
 
@@ -263,7 +263,9 @@ telegram_app.add_handler(CommandHandler("selesai", selesai))
 telegram_app.add_handler(CallbackQueryHandler(button_handler))
 telegram_app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, message_handler))
 
-@app.route(f"/{TOKEN}", methods=["POST"])
+# ================= WEBHOOK ROUTE =================
+
+@app.route("/webhook", methods=["POST"])
 async def webhook():
     update = Update.de_json(request.get_json(force=True), telegram_app.bot)
     await telegram_app.process_update(update)
@@ -272,7 +274,3 @@ async def webhook():
 @app.route("/")
 def home():
     return "Rekber QRIS Bot Running!"
-
-if __name__ == "__main__":
-    telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
