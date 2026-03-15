@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import logging
+import asyncio
 from datetime import datetime
 from flask import Flask, request
 from telegram import (
@@ -71,7 +72,7 @@ def add_user(user):
     ))
     conn.commit()
 
-# ================= START =================
+# ================= TELEGRAM HANDLERS =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -84,13 +85,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤝 *BOT REKBER QRIS*\n\n"
         "💰 Fee Admin Flat: Rp1.000\n"
-        "📌 Berapapun nominal transaksi, fee tetap Rp1.000\n\n"
         "Dana masuk ke QRIS admin & ditahan sampai selesai.",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
-
-# ================= BUTTON HANDLER =================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -107,15 +105,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("UPDATE transactions SET status='escrow' WHERE id=?", (trx_id,))
         conn.commit()
 
-        await query.edit_message_text(f"✅ Transaksi RBX-{trx_id} diverifikasi.\nStatus: ESCROW")
+        await query.edit_message_text(f"✅ Transaksi RBX-{trx_id} diverifikasi.")
 
         cursor.execute("SELECT buyer_id, seller_id FROM transactions WHERE id=?", (trx_id,))
         buyer_id, seller_id = cursor.fetchone()
 
-        await context.bot.send_message(buyer_id, "✅ Pembayaran diverifikasi. Dana ditahan (ESCROW).")
-        await context.bot.send_message(seller_id, "🔔 Dana sudah diterima admin & ditahan.")
-
-# ================= MESSAGE HANDLER =================
+        await context.bot.send_message(buyer_id, "✅ Pembayaran diverifikasi. Dana ditahan.")
+        await context.bot.send_message(seller_id, "🔔 Dana sudah diterima admin.")
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -141,18 +137,17 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["step"] = "seller"
 
         await update.message.reply_text(
-            f"🧾 DETAIL TRANSAKSI\n\n"
             f"💰 Harga: Rp{amount}\n"
             f"📊 Fee: Rp{fee}\n"
             f"💵 Total Bayar: Rp{total}\n\n"
-            f"Masukkan ID Telegram Seller:"
+            "Masukkan ID Telegram Seller:"
         )
 
     elif step == "seller":
         try:
             seller_id = int(update.message.text)
         except:
-            await update.message.reply_text("Masukkan ID Telegram seller yang valid.")
+            await update.message.reply_text("Masukkan ID Telegram valid.")
             return
 
         amount = context.user_data["amount"]
@@ -180,8 +175,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=(
                     f"🆔 ID: RBX-{trx_id}\n"
                     f"💰 Total Bayar: Rp{amount+fee}\n\n"
-                    "Silakan scan QRIS di atas.\n"
-                    "Setelah bayar, kirim foto bukti transfer."
+                    "Silakan scan QRIS.\n"
+                    "Setelah bayar kirim bukti transfer."
                 )
             )
 
@@ -214,10 +209,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard
         )
 
-        await update.message.reply_text("⏳ Bukti dikirim ke admin. Menunggu verifikasi.")
+        await update.message.reply_text("⏳ Menunggu verifikasi admin.")
         context.user_data.clear()
-
-# ================= SELESAI =================
 
 async def selesai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) == 0:
@@ -245,16 +238,13 @@ async def selesai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("UPDATE transactions SET status='selesai' WHERE id=?", (trx_id,))
     conn.commit()
 
-    await update.message.reply_text(
-        "🎉 Transaksi selesai.\nAdmin akan transfer manual ke seller."
-    )
-
+    await update.message.reply_text("🎉 Transaksi selesai.")
     await context.bot.send_message(
         ADMIN_ID,
         f"💸 Transfer manual ke seller ID {seller_id}\nNominal: Rp{amount}"
     )
 
-# ================= TELEGRAM APP INIT =================
+# ================= INIT TELEGRAM =================
 
 telegram_app = Application.builder().token(TOKEN).build()
 
@@ -263,12 +253,12 @@ telegram_app.add_handler(CommandHandler("selesai", selesai))
 telegram_app.add_handler(CallbackQueryHandler(button_handler))
 telegram_app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO, message_handler))
 
-# ================= WEBHOOK ROUTE =================
+# ================= WEBHOOK (SYNC FIX) =================
 
 @app.route("/webhook", methods=["POST"])
-async def webhook():
+def webhook():
     update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    await telegram_app.process_update(update)
+    asyncio.run(telegram_app.process_update(update))
     return "ok"
 
 @app.route("/")
