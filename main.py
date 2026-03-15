@@ -14,14 +14,11 @@ from telegram.ext import (
     filters,
 )
 
-# ================= CONFIG =================
-
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 7777471529  # GANTI DENGAN ID TELEGRAM KAMU
+ADMIN_ID = 7777471529  # GANTI ID TELEGRAM KAMU
 QRIS_IMAGE_PATH = "qris.png"
 
 logging.basicConfig(level=logging.INFO)
-
 app = Flask(__name__)
 
 # ================= DATABASE =================
@@ -33,26 +30,34 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     buyer_id INTEGER,
+    buyer_username TEXT,
     seller_id INTEGER,
     amount INTEGER,
     fee INTEGER,
     status TEXT,
-    proof_file_id TEXT,
     created_at TEXT
 )
 """)
 conn.commit()
 
-# ================= TELEGRAM HANDLERS =================
+# ================= TELEGRAM =================
+
+telegram_app = Application.builder().token(TOKEN).build()
+
+# 🔥 WAJIB INITIALIZE
+asyncio.run(telegram_app.initialize())
+
+# ================= HANDLERS =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("💰 Buat Transaksi", callback_data="buat")]]
 
     await update.message.reply_text(
-        "🤝 BOT REKBER QRIS\n\n"
+        "🤝 *BOT REKBER QRIS*\n\n"
         "💰 Fee Admin Flat: Rp1.000\n"
-        "Dana masuk ke QRIS admin & ditahan sampai selesai.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "Dana ditahan sampai transaksi selesai.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
     )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -61,7 +66,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "buat":
         context.user_data["step"] = "amount"
-        await query.edit_message_text("Masukkan nominal transaksi:")
+        await query.edit_message_text("Masukkan nominal transaksi (angka saja):")
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "step" not in context.user_data:
@@ -77,22 +82,68 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fee = 1000
         total = amount + fee
 
-        context.user_data.clear()
+        context.user_data["amount"] = amount
+        context.user_data["fee"] = fee
+        context.user_data["step"] = "seller"
 
         await update.message.reply_text(
-            f"💰 Total Bayar: Rp{total}\n\nSilakan scan QRIS."
+            f"🧾 DETAIL TRANSAKSI\n\n"
+            f"💰 Harga: Rp{amount}\n"
+            f"📊 Fee Admin: Rp{fee}\n"
+            f"💵 Total Bayar: Rp{total}\n\n"
+            f"Masukkan ID Telegram Seller:"
         )
 
-# ================= INIT TELEGRAM =================
+    elif context.user_data["step"] == "seller":
+        try:
+            seller_id = int(update.message.text)
+        except:
+            await update.message.reply_text("Masukkan ID Telegram seller yang valid.")
+            return
 
-telegram_app = Application.builder().token(TOKEN).build()
+        amount = context.user_data["amount"]
+        fee = context.user_data["fee"]
+        total = amount + fee
+
+        buyer = update.effective_user
+
+        cursor.execute("""
+        INSERT INTO transactions 
+        (buyer_id, buyer_username, seller_id, amount, fee, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            buyer.id,
+            buyer.username,
+            seller_id,
+            amount,
+            fee,
+            "waiting_payment",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ))
+        conn.commit()
+
+        trx_id = cursor.lastrowid
+
+        # Kirim QRIS
+        with open(QRIS_IMAGE_PATH, "rb") as qris:
+            await update.message.reply_photo(
+                photo=qris,
+                caption=(
+                    f"🆔 ID Transaksi: RBX-{trx_id}\n"
+                    f"👤 Buyer: @{buyer.username}\n"
+                    f"🧑‍💼 Seller ID: {seller_id}\n\n"
+                    f"💰 Total Bayar: Rp{total}\n\n"
+                    f"Silakan scan QRIS di atas."
+                )
+            )
+
+        context.user_data.clear()
+
+# ================= REGISTER HANDLER =================
 
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CallbackQueryHandler(button_handler))
 telegram_app.add_handler(MessageHandler(filters.TEXT, message_handler))
-
-# 🔥 PENTING — INITIALIZE SEKALI SAAT START
-asyncio.run(telegram_app.initialize())
 
 # ================= WEBHOOK =================
 
@@ -104,4 +155,4 @@ def webhook():
 
 @app.route("/")
 def home():
-    return "Bot Running!"
+    return "Rekber QRIS Bot Running!"
